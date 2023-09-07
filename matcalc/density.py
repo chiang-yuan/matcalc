@@ -92,24 +92,12 @@ class DensityCalc(PropCalc):
         # relax the structure
         atoms.calc = self.calculator
         stream = io.StringIO()
-        with contextlib.redirect_stdout(stream):
-            obs = TrajectoryObserver(atoms)
-            # if self.mask is not None:
-            #     atoms = ExpCellFilter(atoms, mask=self.mask)
-            optimizer = self.optimizer(atoms)
-            optimizer.attach(obs, interval=self.interval)
-            optimizer.run(fmax=self.fmax, steps=self.steps)
-            if self.out_stem is not None:
-                obs()
-                obs.save(f"{self.out_stem}-relax.pkl")
-            del obs
-        # if self.mask is not None:
-        #     atoms = atoms.atoms
+
+        # step 1: run NVT simulation
 
         MaxwellBoltzmannDistribution(atoms, temperature_K=temperature)
         Stationary(atoms, preserve_temperature=True)
 
-        # run NVT simulation
         nvt = NPT(
             atoms,
             timestep=timestep * units.fs,
@@ -153,8 +141,34 @@ class DensityCalc(PropCalc):
                 del obs
                 restart += 1
 
+        # step 2: relax using exponental cell matrix method
 
-        # run NPT simulation
+        with contextlib.redirect_stdout(stream):
+            optimizer = self.optimizer(atoms)
+
+            if self.mask is not None:
+                atoms = ExpCellFilter(atoms, mask=self.mask)
+
+            if self.out_stem is not None:
+                traj = Trajectory(f"{self.out_stem}-relax-{restart}.traj", "w", atoms)
+                optimizer.attach(traj.write, interval=self.interval)
+
+            obs = TrajectoryObserver(atoms)
+            optimizer.attach(obs, interval=self.interval)
+            optimizer.run(fmax=self.fmax, steps=self.steps)
+            if self.out_stem is not None:
+                traj.close()
+                obs()
+                obs.save(f"{self.out_stem}-relax.pkl")
+
+        # if self.mask is not None:
+        #     atoms = atoms.atoms
+
+        # step 3: run NPT simulation
+
+        MaxwellBoltzmannDistribution(atoms, temperature_K=temperature)
+        Stationary(atoms, preserve_temperature=True)
+
         if not pfactor:
             B = 1 * units.GPa  # bulk modulus
             ptime = 75 * units.fs  # suggested by ase
