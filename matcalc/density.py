@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from ase import optimize, units
+from ase.constraints import ExpCellFilter
 from ase.geometry.cell import Cell
 from ase.io.trajectory import Trajectory
 from ase.md.npt import NPT
@@ -75,6 +76,7 @@ class DensityCalc(PropCalc):
         temperature: float,
         externalstress: float | np.ndarray,
         timestep: float = 2.0,
+        ttime: float | None = 25.0,
         pfactor: float | None = None,
     ) -> dict:
         """Relax the structure and run NPT simulations to compute the density.
@@ -103,12 +105,13 @@ class DensityCalc(PropCalc):
             timestep=timestep * units.fs,
             temperature_K=temperature,
             externalstress=0,
+            ttime=ttime * units.fs if ttime else None,
             pfactor=None, # disable barostat
         )
 
         converged = False
         restart = 0
-        last_erg_avg = None
+        last_erg_avg, first_erg_avg = None, None
         while not converged:
             if self.out_stem is not None:
                 traj = Trajectory(f"{self.out_stem}-nvt-{restart}.traj", "w", atoms)
@@ -120,11 +123,15 @@ class DensityCalc(PropCalc):
 
             erg_avg, erg_std = np.mean(obs.energies), np.std(obs.energies)
 
-            if last_erg_avg is None:
+            if last_erg_avg is None or first_erg_avg is None:
                 last_erg_avg = erg_avg
+                first_erg_avg = erg_avg
                 converged = False
             else:
-                converged = abs(erg_avg - last_erg_avg)/last_erg_avg  < self.rtol
+                converged = (
+                    abs(erg_avg - last_erg_avg)/last_erg_avg  < self.rtol
+                    and np.sign(erg_avg - first_erg_avg) * (erg_avg - last_erg_avg) < 0
+                    )
 
             if self.out_stem is not None:
                 traj.close()
@@ -134,20 +141,21 @@ class DensityCalc(PropCalc):
             if not converged:
                 print(
                     f"Energy not converged, restarting simulation.\n"
-                    f"Current relative deviation: {(erg_avg - last_erg_avg)/last_erg_avg*100} %. \n" if last_erg_avg != erg_avg else ""  # noqa: E501
+                    f"Current relative deviation: {(erg_avg - last_erg_avg)/last_erg_avg*100} %. \n" if last_erg_avg != erg_avg else "\n"  # noqa: E501
                     f"Target relative deviation: {self.rtol*100} %."
                     )
                 nvt.observers.clear()
                 del obs
+                last_erg_avg = erg_avg
                 restart += 1
 
-        # step 2: relax using exponental cell matrix method
+        # step 2: relax using exponential cell matrix method
 
         with contextlib.redirect_stdout(stream):
             optimizer = self.optimizer(atoms)
 
             if self.mask is not None:
-                atoms = ExpCellFilter(atoms, mask=self.mask)
+                ecf = ExpCellFilter(atoms, mask=self.mask)
 
             if self.out_stem is not None:
                 traj = Trajectory(f"{self.out_stem}-relax-{restart}.traj", "w", atoms)
@@ -161,8 +169,8 @@ class DensityCalc(PropCalc):
                 obs()
                 obs.save(f"{self.out_stem}-relax.pkl")
 
-        # if self.mask is not None:
-        #     atoms = atoms.atoms
+        if self.mask is not None:
+            atoms = ecf.atoms
 
         # step 3: run NPT simulation
 
@@ -179,13 +187,14 @@ class DensityCalc(PropCalc):
             timestep=timestep * units.fs,
             temperature_K=temperature,
             externalstress=externalstress,
+            ttime=ttime * units.fs if ttime else None,
             pfactor=pfactor,
             mask=self.mask,
         )
 
         converged, erg_converged, str_converged = False, False, False
         restart = 0
-        last_erg_avg = None
+        last_erg_avg, first_erg_avg = None, None
         while not converged:
             if self.out_stem is not None:
                 traj = Trajectory(f"{self.out_stem}-npt-{restart}.traj", "w", atoms)
@@ -197,11 +206,15 @@ class DensityCalc(PropCalc):
 
             erg_avg, erg_std = np.mean(obs.energies), np.std(obs.energies)
 
-            if last_erg_avg is None:
+            if last_erg_avg is None or first_erg_avg is None:
                 last_erg_avg = erg_avg
+                first_erg_avg = erg_avg
                 erg_converged = False
             else:
-                erg_converged = abs(erg_avg - last_erg_avg)/last_erg_avg  < self.rtol
+                erg_converged = (
+                    abs(erg_avg - last_erg_avg)/last_erg_avg  < self.rtol
+                    and np.sign(erg_avg - first_erg_avg) * (erg_avg - last_erg_avg) < 0
+                    )
 
             stress = np.mean(np.stack(obs.stresses, axis=0), axis=0)
             str_converged = np.allclose(npt.externalstress, stress, atol=self.atol, rtol=self.rtol)
@@ -216,13 +229,14 @@ class DensityCalc(PropCalc):
             if not converged:
                 print(
                     f"Energy or stress not converged, restarting simulation.\n"
-                    f"Current relative energy deviation: {(erg_avg - last_erg_avg)/last_erg_avg*100} %.\n" if last_erg_avg != erg_avg else ""  # noqa: E501
+                    f"Current relative energy deviation: {(erg_avg - last_erg_avg)/last_erg_avg*100} %.\n" if last_erg_avg != erg_avg else "\n"  # noqa: E501
                     f"Target relative energy deviation: {self.rtol*100} %.\n"
                     f"Current pressure: {stress} eV/A^3.\n"
                     f"Target pressure: {npt.externalstress} eV/A^3."
                     )
                 npt.observers.clear()
                 del obs
+                last_erg_avg = erg_avg
                 restart += 1
 
         volumes = [Cell(matrix).volume for matrix in obs.cells]

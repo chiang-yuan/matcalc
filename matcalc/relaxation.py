@@ -44,11 +44,16 @@ class TrajectoryObserver:
         """The logic for saving the properties of an Atoms during the relaxation."""
         self.energies.append(float(self.atoms.get_potential_energy()))
         self.forces.append(self.atoms.get_forces())
-        self.stresses.append(self.atoms.get_stress(include_ideal_gas=True))
         # Stress tensor should include the contribution from the momenta, otherwise
         # during MD simulattion the stress tensor ignores the effect of kinetic part,
         # leanding to the discrepancy between applied pressure and the stress tensor.
         # For more details, see: https://gitlab.com/ase/ase/-/merge_requests/1500
+        try:
+            stress = self.atoms.get_stress(include_ideal_gas=True)
+        except Exception:
+            stress = self.atoms.get_stress()
+        self.stresses.append(stress)
+
         self.atom_positions.append(self.atoms.get_positions())
         self.cells.append(self.atoms.get_cell()[:])
 
