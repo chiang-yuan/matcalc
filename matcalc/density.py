@@ -75,9 +75,10 @@ class DensityCalc(PropCalc):
         atoms: Atoms,
         temperature: float,
         externalstress: float | np.ndarray,
-        timestep: float = 2.0,
-        ttime: float | None = 25.0,
-        pfactor: float | None = None,
+        timestep: float = 2.0 * units.fs,
+        ttime: float = 25.0 * units.fs,
+        pfactor: float = (75 * units.fs)**2 * units.GPa,
+        annealing: float = 1.0
     ) -> dict:
         """Relax the structure and run NPT simulations to compute the density.
 
@@ -85,8 +86,12 @@ class DensityCalc(PropCalc):
             atoms (Atoms): Structure to relax.
             temperature (float): Temperature of the simulation in Kelvin.
             externalstress: External pressure of the simulation in eV/A^3.
-            timestep (float, optional): Timestep of the simulation in fs. Defaults to 1.0.
-            pfactor (float | None, optional): Pressure factor of the simulation. Defaults to None.
+            timestep (float, optional): Timestep of the simulation in ASE internal units. Defaults to 2.0 fs.
+            ttime (float | None, optional): Characteristic timescale of thermostat in ASE internal units.
+                                            Defaults to 25.0 fs.
+            pfactor (float | None, optional): Constant factor in barastat differential equation in ASE interel units.
+                                              Defaults to (75 fs)^2 * 1 GPa.
+            annealing (float, optional): Temperature factor for the NVT velocities. Defaults to 1.0.
 
         Returns:
             Atoms: Relaxed structure.
@@ -102,10 +107,10 @@ class DensityCalc(PropCalc):
 
         nvt = NPT(
             atoms,
-            timestep=timestep * units.fs,
-            temperature_K=temperature,
+            timestep=timestep,
+            temperature_K=temperature * annealing,
             externalstress=0,
-            ttime=ttime * units.fs if ttime else None,
+            ttime=ttime,
             pfactor=None, # disable barostat
         )
 
@@ -177,17 +182,12 @@ class DensityCalc(PropCalc):
         MaxwellBoltzmannDistribution(atoms, temperature_K=temperature)
         Stationary(atoms, preserve_temperature=True)
 
-        if not pfactor:
-            B = 1 * units.GPa  # bulk modulus
-            ptime = 75 * units.fs  # suggested by ase
-            pfactor = ptime**2 * B
-
         npt = NPT(
             atoms,
-            timestep=timestep * units.fs,
+            timestep=timestep,
             temperature_K=temperature,
             externalstress=externalstress,
-            ttime=ttime * units.fs if ttime else None,
+            ttime=ttime,
             pfactor=pfactor,
             mask=self.mask,
         )
