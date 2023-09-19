@@ -91,7 +91,7 @@ class DensityCalc(PropCalc):
                                             Defaults to 25.0 fs.
             pfactor (float | None, optional): Constant factor in barastat differential equation in ASE interel units.
                                               Defaults to (75 fs)^2 * 1 GPa.
-            annealing (float, optional): Temperature factor for the npe velocities. Defaults to 1.0.
+            annealing (float, optional): Temperature factor for the nvt velocities. Defaults to 1.0.
 
         Returns:
             Atoms: Relaxed structure.
@@ -123,12 +123,12 @@ class DensityCalc(PropCalc):
         # if self.mask is not None:
         #     atoms = ecf.atoms
 
-        # step 1: run npe simulation
+        # step 1: run nvt simulation
 
         MaxwellBoltzmannDistribution(atoms, temperature_K=temperature * annealing)
         Stationary(atoms, preserve_temperature=True)
 
-        npe = NPT(
+        nvt = NPT(
             atoms,
             timestep=timestep,
             temperature_K=temperature * annealing,
@@ -137,19 +137,19 @@ class DensityCalc(PropCalc):
             pfactor=None,
             mask=self.mask,
         )
-        npe.set_fraction_traceless(0.0)
+        nvt.set_fraction_traceless(0.0)
 
         converged, erg_converged, str_converged = False, False, False
         restart = 0
         last_erg_avg, first_erg_avg = None, None
         while not converged:
             if self.out_stem is not None:
-                traj = Trajectory(f"{self.out_stem}-npe-{restart}.traj", "w", atoms)
-                npe.attach(traj.write, interval=self.interval)
+                traj = Trajectory(f"{self.out_stem}-nvt-{restart}.traj", "w", atoms)
+                nvt.attach(traj.write, interval=self.interval)
 
             obs = TrajectoryObserver(atoms)
-            npe.attach(obs, interval=self.interval)
-            npe.run(steps=self.steps)
+            nvt.attach(obs, interval=self.interval)
+            nvt.run(steps=self.steps)
 
             erg_avg, erg_std = np.mean(obs.energies), np.std(obs.energies)
 
@@ -165,7 +165,7 @@ class DensityCalc(PropCalc):
 
             stress = np.mean(np.stack(obs.stresses, axis=0), axis=0)
             str_converged = np.allclose(
-                npe.externalstress, stress, atol=self.atol, rtol=self.rtol
+                nvt.externalstress, stress, atol=self.atol, rtol=self.rtol
             )
 
             converged = erg_converged # and str_converged
@@ -173,7 +173,7 @@ class DensityCalc(PropCalc):
             if self.out_stem is not None:
                 traj.close()
                 obs()
-                obs.save(f"{self.out_stem}-npe-{restart}.pkl")
+                obs.save(f"{self.out_stem}-nvt-{restart}.pkl")
 
             if not converged:
                 print(
@@ -186,38 +186,17 @@ class DensityCalc(PropCalc):
                 )
                 print(f"Target relative energy deviation: {self.rtol*100} %." if not erg_converged else "\r")
                 print(f"Current pressure: {stress} eV/A^3." if not str_converged else "Pressure converged.")
-                print(f"Target pressure: {npe.externalstress} eV/A^3." if not str_converged else "\r")
-                npe.observers.clear()
+                print(f"Target pressure: {nvt.externalstress} eV/A^3." if not str_converged else "\r")
+                nvt.observers.clear()
                 del obs
                 # npt.zero_center_of_mass_momentum()
                 last_erg_avg = erg_avg
                 restart += 1
 
-        # with contextlib.redirect_stdout(stream):
-        #     optimizer = self.optimizer(atoms)
-
-        #     if self.mask is not None:
-        #         ecf = ExpCellFilter(atoms, mask=self.mask)
-
-        #     if self.out_stem is not None:
-        #         traj = Trajectory(f"{self.out_stem}-ecf.traj", "w", atoms)
-        #         optimizer.attach(traj.write, interval=self.interval)
-
-        #     obs = TrajectoryObserver(atoms)
-        #     optimizer.attach(obs, interval=self.interval)
-        #     optimizer.run(fmax=self.fmax, steps=self.steps)
-        #     if self.out_stem is not None:
-        #         traj.close()
-        #         obs()
-        #         obs.save(f"{self.out_stem}-ecf.pkl")
-
-        # if self.mask is not None:
-        #     atoms = ecf.atoms
-
         # step 3: run NPT simulation
 
-        MaxwellBoltzmannDistribution(atoms, temperature_K=temperature)
-        Stationary(atoms, preserve_temperature=True)
+        # MaxwellBoltzmannDistribution(atoms, temperature_K=temperature)
+        # Stationary(atoms, preserve_temperature=True)
 
         npt = NPT(
             atoms,
