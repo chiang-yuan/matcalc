@@ -6,7 +6,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="matcalc",
-    version="0.0.2",
+    version="0.0.3",
     author="Eliott Liu, Ji Qi, Tsz Wai Ko, Janosh Riebesell, Shyue Ping Ong",
     author_email="ongsp@ucsd.edu",
     maintainer="Shyue Ping Ong",
@@ -29,6 +29,7 @@ setup(
     python_requires=">=3.8",
     package_data={},
     install_requires=("ase", "pymatgen", "joblib", "phonopy"),
+    extras_require={"models": ["matgl", "chgnet"]},
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Science/Research",
