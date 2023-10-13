@@ -4,7 +4,7 @@ from __future__ import annotations
 import contextlib
 import io
 from inspect import isclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 from ase import optimize, units
@@ -18,6 +18,8 @@ from .base import PropCalc
 from .relaxation import TrajectoryObserver
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ase import Atoms
     from ase.calculators.calculator import Calculator
 
@@ -35,7 +37,7 @@ class DensityCalc(PropCalc):
         mask: list | np.ndarray | None = None,
         rtol: float = 1e-4,
         atol: float = 1e-4,
-        out_stem: str | None = None,
+        out_stem: str | Path = ".",
     ):
         """
         Initialize the Density Calculator.
@@ -61,7 +63,9 @@ class DensityCalc(PropCalc):
         if isinstance(optimizer, str) and optimizer not in valid_keys:
             raise ValueError(f"Unknown {optimizer=}, must be one of {valid_keys}")
 
-        self.optimizer = optimizer
+        self.optimizer: Optimizer = (
+            getattr(optimize, optimizer) if isinstance(optimizer, str) else optimizer
+        )
         self.steps = steps
         self.interval = interval
         self.fmax = fmax
@@ -103,6 +107,8 @@ class DensityCalc(PropCalc):
         # step 0: relax at 0 K
 
         with contextlib.redirect_stdout(stream):
+            assert isinstance(self.optimizer, Optimizer)
+            assert isinstance(self.optimizer, Callable)
             optimizer = self.optimizer(atoms)
 
             # if self.mask is not None:
@@ -168,7 +174,7 @@ class DensityCalc(PropCalc):
                 nvt.externalstress, stress, atol=self.atol, rtol=self.rtol
             )
 
-            converged = erg_converged # and str_converged
+            converged = erg_converged  # and str_converged
 
             if self.out_stem is not None:
                 traj.close()
@@ -184,9 +190,21 @@ class DensityCalc(PropCalc):
                     if not erg_converged
                     else "Energy converged."
                 )
-                print(f"Target relative energy deviation: {self.rtol*100} %." if not erg_converged else "\r")
-                print(f"Current pressure: {stress} eV/A^3." if not str_converged else "Pressure converged.")
-                print(f"Target pressure: {nvt.externalstress} eV/A^3." if not str_converged else "\r")
+                print(
+                    f"Target relative energy deviation: {self.rtol*100} %."
+                    if not erg_converged
+                    else "\r"
+                )
+                print(
+                    f"Current pressure: {stress} eV/A^3."
+                    if not str_converged
+                    else "Pressure converged."
+                )
+                print(
+                    f"Target pressure: {nvt.externalstress} eV/A^3."
+                    if not str_converged
+                    else "\r"
+                )
                 nvt.observers.clear()
                 del obs
                 # npt.zero_center_of_mass_momentum()
@@ -254,9 +272,21 @@ class DensityCalc(PropCalc):
                     if not erg_converged
                     else "Energy converged."
                 )
-                print(f"Target relative energy deviation: {self.rtol*100} %." if not erg_converged else "\r")
-                print(f"Current pressure: {stress} eV/A^3." if not str_converged else "Pressure converged.")
-                print(f"Target pressure: {npt.externalstress} eV/A^3." if not str_converged else "\r")
+                print(
+                    f"Target relative energy deviation: {self.rtol*100} %."
+                    if not erg_converged
+                    else "\r"
+                )
+                print(
+                    f"Current pressure: {stress} eV/A^3."
+                    if not str_converged
+                    else "Pressure converged."
+                )
+                print(
+                    f"Target pressure: {npt.externalstress} eV/A^3."
+                    if not str_converged
+                    else "\r"
+                )
                 npt.observers.clear()
                 del obs
                 # npt.zero_center_of_mass_momentum()
